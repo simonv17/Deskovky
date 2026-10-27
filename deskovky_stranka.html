@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Přehled deskových her</title>
+<style>
+:root { 
+  color-scheme: dark; 
+  --ink: #f3f4f6; 
+  --muted: #9ca3af; 
+  --line: #374151; 
+  --panel: #1f2937; 
+  --bg: #111827; 
+  --accent: #3b82f6; 
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+header { background:linear-gradient(135deg,#111827,#1f2937); border-bottom:1px solid var(--line); color:#fff; padding:30px max(20px, calc((100% - 1180px)/2)); }
+h1 { margin:0 0 6px; font-size:clamp(1.7rem,4vw,2.3rem); color:#ffffff; }
+header p { margin:0; color:var(--muted); }
+main { max-width:1180px; margin:22px auto; padding:0 16px 36px; }
+.controls { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; display:grid; grid-template-columns:minmax(200px,2fr) repeat(4,minmax(120px,1fr)) auto; gap:12px; box-shadow:0 4px 20px rgba(0,0,0,0.4); }
+label { display:block; color:var(--muted); font-size:.82rem; margin:0 0 5px; font-weight:650; }
+input,select,button { font:inherit; width:100%; border:1px solid var(--line); border-radius:9px; background:#374151; color:var(--ink); padding:10px 14px; }
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+button { cursor:pointer; align-self:end; background:#4b5563; font-weight:650; color:#fff; transition: background 0.2s; }
+button:hover { background:#6b7280; }
+.summary { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin:16px 2px; color:var(--muted); font-size:.92rem; }
+.table-wrap { background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.4); }
+table { border-collapse:collapse; width:100%; }
+th { background:#111827; color:var(--muted); font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; text-align:left; padding:12px 16px; position:sticky; top:0; border-bottom:1px solid var(--line); }
+td { padding:12px 16px; border-top:1px solid var(--line); color:var(--ink); }
+tbody tr:hover { background:rgba(255,255,255,0.02); }
+.location { display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:.9rem; font-weight:600; }
+.name { font-weight:600; }
+.empty { display:none; padding:30px; text-align:center; color:var(--muted); }
+footer { color:var(--muted); font-size:.85rem; margin:14px 2px; }
+@media(max-width:900px) {
+ .controls { grid-template-columns:1fr; }
+ .controls button { width:100%; }
+ .table-wrap { overflow-x:auto; }
+ table { min-width:600px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎲 Přehled deskových her</h1>
+  <p>Vyhledej hru a zjisti barvu skříně i poličky, na které je uložená.</p>
+</header>
+<main>
+  <section class="controls" aria-label="Vyhledávání a filtry">
+    <div><label for="search">Název hry</label><input id="search" type="search" placeholder="Začni psát název hry…"></div>
+    <div><label for="players">Počet hráčů</label><select id="players"><option value="">Všichni</option></select></div>
+    <div><label for="time">Doba hraní</label><select id="time"><option value="">Všechny</option></select></div>
+    <div><label for="cabinet">Barva skříně</label><select id="cabinet"><option value="">Všechny skříně</option></select></div>
+    <div><label for="shelf">Barva poličky</label><select id="shelf"><option value="">Všechny poličky</option></select></div>
+    <button id="reset" type="button">Vymazat filtry</button>
+  </section>
+  <div class="summary"><strong id="count">Načítání z Google tabulky…</strong><span>Data se automaticky aktualizují.</span></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Hra</th><th>Počet hráčů</th><th>Doba hraní</th><th>Umístění</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">Žádné hry neodpovídají zadaným filtrům.</div>
+  </div>
+  <footer>Tip: vyhledávání funguje i při zadání části názvu.</footer>
+</main>
+
+<script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbyOYLLK3eemAKraTUZ2nIlb9-6su98PMQ0xtodm25mqetV35eMEr3k4c18812rSF3pM2A/exec';
+
+// Převodní tabulka pro vaše zkratky a plné názvy barev
+const COLOR_DICT = {
+  'b': 'bílá', 'bílá': 'bílá', 'bila': 'bílá',
+  'č': 'červená', 'červená': 'červená', 'cervena': 'červená', 'c': 'červená',
+  'ž': 'žlutá', 'žlutá': 'žlutá', 'zluta': 'žlutá',
+  'z': 'zelená', 'zelená': 'zelená', 'zelena': 'zelená',
+  'm': 'modrá', 'modrá': 'modrá', 'modra': 'modrá',
+  'oranžová': 'oranžová', 'oranzova': 'oranžová', 'o': 'oranžová',
+  'fialová': 'fialová', 'fialova': 'fialová', 'f': 'fialová',
+  'šedá': 'šedá', 'seda': 'šedá', 'š': 'šedá'
+};
+
+const COLOR_MAP = {
+  'zelená': '#6aa84f',
+  'modrá': '#4a86e8',
+  'žlutá': '#ffd966',
+  'oranžová': '#ff9900',
+  'fialová': '#9900ff',
+  'šedá': '#b7b7b7',
+  'červená': '#cc0000',
+  'bílá': '#ffffff'
+};
+
+let games = [];
+const $ = id => document.getElementById(id);
+const norm = s => s ? s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('cs') : '';
+const unique = xs => [...new Set(xs.filter(Boolean))].sort((a,b)=>a.localeCompare(b,'cs'));
+
+async function loadGames() {
+  try {
+    const response = await fetch(API_URL);
+    if (!response.ok) throw new Error('Chyba při načítání dat');
+    
+    const rows = await response.json();
+    games = parseGridData(rows);
+    
+    initFilters();
+    render();
+  } catch (error) {
+    console.error(error);
+    $('count').textContent = 'Chyba při načítání dat z Google tabulky.';
+  }
+}
+
+function parseGridData(lines) {
+  if (lines.length < 4) return [];
+
+  const rowPlayers = lines[0];
+  const rowTime = lines[1];
+  const rowCabinet = lines[2]; // Zde je např. Skříň/Červená/Z
+
+  let currentPlayers = '';
+  let currentTime = '';
+  let currentShelf = '';
+  let currentCabinet = '';
+  const columnsMeta = [];
+
+  const maxCols = Math.max(rowPlayers.length, rowTime.length, rowCabinet.length);
+  for (let c = 0; c < maxCols; c++) {
+    let p = rowPlayers[c] || '';
+    if (p && p !== '-') currentPlayers = p;
+
+    let t = rowTime[c] || '';
+    if (t && t !== '-') currentTime = t;
+
+    let cabRaw = rowCabinet[c] || '';
+    if (cabRaw.includes('/')) {
+      let parts = cabRaw.split('/').map(part => part.trim().toLowerCase());
+      // parts[1] = barva poličky, parts[2] = barva skříně
+      if (parts[1] && COLOR_DICT[parts[1]]) currentShelf = COLOR_DICT[parts[1]];
+      if (parts[2] && COLOR_DICT[parts[2]]) currentCabinet = COLOR_DICT[parts[2]];
+    }
+
+    let finalTime = (t && t !== '-') ? t : (currentTime || 'Nezadáno');
+
+    columnsMeta[c] = {
+      players: currentPlayers,
+      time: finalTime,
+      cabinet: currentCabinet || 'neznámá',
+      shelf: currentShelf || 'neznámá'
+    };
+  }
+
+  const result = [];
+
+  for (let r = 3; r < lines.length; r++) {
+    const row = lines[r];
+    for (let c = 0; c < row.length; c++) {
+      const gameName = row[c];
+      if (gameName && gameName !== '-' && columnsMeta[c]) {
+        const meta = columnsMeta[c];
+
+        result.push({
+          name: gameName,
+          players: meta.players || 'Nezadáno',
+          time: meta.time,
+          cabinet: meta.cabinet,
+          shelf: meta.shelf,
+          cabinetHex: COLOR_MAP[meta.cabinet] || '#cccccc',
+          shelfHex: COLOR_MAP[meta.shelf] || '#cccccc'
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+function initFilters() {
+  const pSel = $('players'), tSel = $('time'), cSel = $('cabinet'), sSel = $('shelf');
+  const curP = pSel.value, curT = tSel.value, curC = cSel.value, curS = sSel.value;
+
+  pSel.innerHTML = '<option value="">Všichni</option>';
+  tSel.innerHTML = '<option value="">Všechny</option>';
+  cSel.innerHTML = '<option value="">Všechny skříně</option>';
+  sSel.innerHTML = '<option value="">Všechny poličky</option>';
+
+  for (const v of unique(games.map(g => g.players))) {
+    const o = document.createElement('option'); o.value = v; o.textContent = v; pSel.append(o);
+  }
+  for (const v of unique(games.map(g => g.time))) {
+    const o = document.createElement('option'); o.value = v; o.textContent = v; tSel.append(o);
+  }
+  for (const v of unique(games.map(g => g.cabinet))) {
+    const o = document.createElement('option'); o.value = v; o.textContent = v.charAt(0).toUpperCase() + v.slice(1); cSel.append(o);
+  }
+  for (const v of unique(games.map(g => g.shelf))) {
+    const o = document.createElement('option'); o.value = v; o.textContent = v.charAt(0).toUpperCase() + v.slice(1); sSel.append(o);
+  }
+
+  pSel.value = curP; tSel.value = curT; cSel.value = curC; sSel.value = curS;
+}
+
+function render() {
+  const q = norm($('search').value.trim());
+  const p = $('players').value, t = $('time').value, c = $('cabinet').value, s = $('shelf').value;
+
+  const filtered = games.filter(g => 
+    norm(g.name).includes(q) && 
+    (!p || g.players === p) && 
+    (!t || g.time === t) && 
+    (!c || g.cabinet === c) && 
+    (!s || g.shelf === s)
+  ).sort((a,b) => a.name.localeCompare(b.name,'cs'));
+  
+  $('rows').innerHTML = filtered.map(g => `
+    <tr>
+      <td class="name">${escapeHtml(g.name)}</td>
+      <td>${escapeHtml(g.players)}</td>
+      <td>${escapeHtml(g.time)}</td>
+      <td>
+        <div class="location">
+          <span style="color:${g.cabinetHex}">Skříň ■</span>
+          <span style="color:${g.shelfHex}">Polička ■</span>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  
+  $('count').textContent = `Zobrazeno ${filtered.length} z ${games.length} záznamů`;
+  $('empty').style.display = filtered.length ? 'none' : 'block';
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+$('search').addEventListener('input', render);
+$('players').addEventListener('change', render);
+$('time').addEventListener('change', render);
+$('cabinet').addEventListener('change', render);
+$('shelf').addEventListener('change', render);
+$('reset').addEventListener('click', () => { 
+  $('search').value = ''; $('players').value = ''; $('time').value = ''; $('cabinet').value = ''; $('shelf').value = ''; render(); 
+});
+
+loadGames();
+setInterval(loadGames, 300000);
+</script>
+</body>
+</html>
