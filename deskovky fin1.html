@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Přehled deskových her</title>
+<style>
+:root { 
+  color-scheme: dark; 
+  --ink: #f3f4f6; 
+  --muted: #9ca3af; 
+  --line: #374151; 
+  --panel: #1f2937; 
+  --bg: #111827; 
+  --accent: #3b82f6; 
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+header { background:linear-gradient(135deg,#111827,#1f2937); border-bottom:1px solid var(--line); color:#fff; padding:30px max(20px, calc((100% - 1180px)/2)); }
+h1 { margin:0 0 6px; font-size:clamp(1.7rem,4vw,2.3rem); color:#ffffff; }
+header p { margin:0; color:var(--muted); }
+main { max-width:1180px; margin:22px auto; padding:0 16px 36px; }
+.controls { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; display:grid; grid-template-columns:1fr auto; gap:12px; box-shadow:0 4px 20px rgba(0,0,0,0.4); }
+label { display:block; color:var(--muted); font-size:.82rem; margin:0 0 5px; font-weight:650; }
+input,button { font:inherit; width:100%; border:1px solid var(--line); border-radius:9px; background:#374151; color:var(--ink); padding:10px 14px; }
+input:focus { outline: none; border-color: var(--accent); }
+button { cursor:pointer; align-self:end; background:#4b5563; font-weight:650; color:#fff; transition: background 0.2s; white-space:nowrap; }
+button:hover { background:#6b7280; }
+.summary { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin:16px 2px; color:var(--muted); font-size:.92rem; }
+.table-wrap { background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.4); }
+table { border-collapse:collapse; width:100%; }
+th { background:#111827; color:var(--muted); font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; text-align:left; padding:12px 16px; position:sticky; top:0; border-bottom:1px solid var(--line); }
+td { padding:12px 16px; border-top:1px solid var(--line); color:var(--ink); }
+tbody tr:hover { background:rgba(255,255,255,0.02); }
+.location { display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:.9rem; font-weight:600; white-space:nowrap; }
+.name { font-weight:600; }
+.empty { display:none; padding:30px; text-align:center; color:var(--muted); }
+footer { color:var(--muted); font-size:.85rem; margin:14px 2px; }
+@media(max-width:600px) {
+ .controls { grid-template-columns:1fr; }
+ .controls button { width:100%; }
+ .table-wrap { overflow-x:auto; }
+ table { min-width:500px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎲 Přehled deskových her</h1>
+  <p>Vyhledej hru podle názvu a zjisti její umístění, počet hráčů i dobu hraní.</p>
+</header>
+<main>
+  <section class="controls" aria-label="Vyhledávání">
+    <div>
+      <label for="search">Název hry</label>
+      <input id="search" type="search" placeholder="Začni psát název hry…">
+    </div>
+    <button id="reset" type="button">Vymazat hledání</button>
+  </section>
+  <div class="summary"><strong id="count">Načítání z Google tabulky…</strong><span>Data se automaticky aktualizují.</span></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Hra</th><th>Umístění</th><th>Počet hráčů</th><th>Doba hraní</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">Žádná hra neodpovídá zadanému názvu.</div>
+  </div>
+  <footer>Tip: vyhledávání funguje i při zadání části názvu.</footer>
+</main>
+
+<script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbyOYLLK3eemAKraTUZ2nIlb9-6su98PMQ0xtodm25mqetV35eMEr3k4c18812rSF3pM2A/exec';
+
+const COLOR_DICT = {
+  'b': 'bílá', 'bílá': 'bílá', 'bila': 'bílá',
+  'č': 'červená', 'červená': 'červená', 'cervena': 'červená', 'c': 'červená',
+  'ž': 'žlutá', 'žlutá': 'žlutá', 'zluta': 'žlutá',
+  'z': 'zelená', 'zelená': 'zelená', 'zelena': 'zelená',
+  'm': 'modrá', 'modrá': 'modrá', 'modra': 'modrá',
+  'oranžová': 'oranžová', 'oranzova': 'oranžová', 'o': 'oranžová',
+  'fialová': 'fialová', 'fialova': 'fialová', 'f': 'fialová',
+  'šedá': 'šedá', 'seda': 'šedá', 'š': 'šedá'
+};
+
+const COLOR_MAP = {
+  'zelená': '#6aa84f',
+  'modrá': '#4a86e8',
+  'žlutá': '#ffd966',
+  'oranžová': '#ff9900',
+  'fialová': '#9900ff',
+  'šedá': '#b7b7b7',
+  'červená': '#cc0000',
+  'bílá': '#ffffff'
+};
+
+let games = [];
+const $ = id => document.getElementById(id);
+const norm = s => s ? s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('cs') : '';
+
+async function loadGames() {
+  try {
+    const response = await fetch(API_URL);
+    if (!response.ok) throw new Error('Chyba při načítání dat');
+    
+    const rows = await response.json();
+    games = parseGridData(rows);
+    render();
+  } catch (error) {
+    console.error(error);
+    $('count').textContent = 'Chyba při načítání dat z Google tabulky.';
+  }
+}
+
+function parseGridData(lines) {
+  if (lines.length < 4) return [];
+
+  const rowPlayers = lines[0];
+  const rowTime = lines[1];
+  const rowCabinet = lines[2];
+
+  let currentPlayers = '';
+  let currentTime = '';
+  let currentShelf = '';
+  let currentCabinet = '';
+  const columnsMeta = [];
+
+  const maxCols = Math.max(rowPlayers.length, rowTime.length, rowCabinet.length);
+  for (let c = 0; c < maxCols; c++) {
+    let p = rowPlayers[c] || '';
+    if (p && p !== '-') currentPlayers = p;
+
+    let t = rowTime[c] || '';
+    if (t && t !== '-') currentTime = t;
+
+    let cabRaw = rowCabinet[c] || '';
+    if (cabRaw.includes('/')) {
+      let parts = cabRaw.split('/').map(part => part.trim().toLowerCase());
+      if (parts[1] && COLOR_DICT[parts[1]]) currentShelf = COLOR_DICT[parts[1]];
+      if (parts[2] && COLOR_DICT[parts[2]]) currentCabinet = COLOR_DICT[parts[2]];
+    }
+
+    let finalTime = (t && t !== '-') ? t : (currentTime || 'Nezadáno');
+
+    columnsMeta[c] = {
+      players: currentPlayers,
+      time: finalTime,
+      cabinet: currentCabinet || 'neznámá',
+      shelf: currentShelf || 'neznámá'
+    };
+  }
+
+  const result = [];
+
+  for (let r = 3; r < lines.length; r++) {
+    const row = lines[r];
+    for (let c = 0; c < row.length; c++) {
+      const gameName = row[c];
+      if (gameName && gameName !== '-' && columnsMeta[c]) {
+        const meta = columnsMeta[c];
+
+        result.push({
+          name: gameName,
+          players: meta.players || 'Nezadáno',
+          time: meta.time,
+          cabinet: meta.cabinet,
+          shelf: meta.shelf,
+          cabinetHex: COLOR_MAP[meta.cabinet] || '#cccccc',
+          shelfHex: COLOR_MAP[meta.shelf] || '#cccccc'
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+function render() {
+  const q = norm($('search').value.trim());
+
+  const filtered = games.filter(g => 
+    norm(g.name).includes(q)
+  ).sort((a,b) => a.name.localeCompare(b.name,'cs'));
+  
+  $('rows').innerHTML = filtered.map(g => `
+    <tr>
+      <td class="name">${escapeHtml(g.name)}</td>
+      <td>
+        <div class="location">
+          <span style="color:${g.cabinetHex}">Skříň ■</span>
+          <span style="color:${g.shelfHex}">Polička ■</span>
+        </div>
+      </td>
+      <td>${escapeHtml(g.players)}</td>
+      <td>${escapeHtml(g.time)}</td>
+    </tr>
+  `).join('');
+  
+  $('count').textContent = `Zobrazeno ${filtered.length} z ${games.length} záznamů`;
+  $('empty').style.display = filtered.length ? 'none' : 'block';
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+$('search').addEventListener('input', render);
+$('reset').addEventListener('click', () => { 
+  $('search').value = ''; 
+  render(); 
+});
+
+loadGames();
+setInterval(loadGames, 300000);
+</script>
+</body>
+</html>
